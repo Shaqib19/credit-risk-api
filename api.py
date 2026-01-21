@@ -6,7 +6,7 @@ import bcrypt
 import pickle
 import numpy as np
 import uuid
-
+import pandas as pd
 # ================= APP =================
 app = FastAPI(title="Credit Risk API")
 app.add_middleware(
@@ -135,5 +135,6 @@ def predict(data: PredictInput, token: str = Header(None)):
 @app.get("/")
 def health():
     return {"status": "API running"}
+
 
 
