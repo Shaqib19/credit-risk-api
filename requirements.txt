@@ -4,4 +4,6 @@ pandas
 numpy
 scikit-learn
 pydantic
+bcrypt
 mysql-connector-python
+
