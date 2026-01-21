@@ -9,13 +9,16 @@ import uuid
 
 # ================= APP =================
 app = FastAPI(title="Credit Risk API")
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "https://credit-risk-detect.netlify.app"
+    ],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 # ================= DATABASE =================
 DB = "users.db"
@@ -134,3 +137,4 @@ def predict(data: PredictInput, token: str = Header(None)):
 @app.get("/")
 def health():
     return {"status": "API running"}
+
