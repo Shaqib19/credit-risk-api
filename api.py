@@ -5,27 +5,20 @@ import pandas as pd
 import numpy as np
 import pickle
 
-# ==================================================
-# LOAD MODEL
-# ==================================================
+# Load model
 with open("credit_risk_model.pkl", "rb") as f:
     model = pickle.load(f)
 
 app = FastAPI(title="Credit Risk API")
 
-# ==================================================
-# CORS (REQUIRED FOR NETLIFY)
-# ==================================================
+# CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # later restrict to Netlify URL
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# ==================================================
-# INPUT SCHEMA
-# ==================================================
 class Applicant(BaseModel):
     age: int
     income: float
@@ -35,15 +28,20 @@ class Applicant(BaseModel):
     loan_tenure: int
     past_default_history: int
 
-# ==================================================
-# PREDICTION
-# ==================================================
 @app.post("/predict")
 def predict(applicant: Applicant):
 
+    # HARD SAFETY CHECK
+    if (
+        applicant.income <= 0 or
+        applicant.loan_amount <= 0 or
+        applicant.loan_tenure <= 0 or
+        applicant.credit_score <= 0
+    ):
+        return {"default_probability": 1.0, "risk_category": "HIGH"}
+
     df = pd.DataFrame([applicant.dict()])
 
-    # Feature engineering (MATCH TRAINING)
     df["monthly_income"] = df["income"] / 12
     df["emi"] = df["loan_amount"] / df["loan_tenure"]
     df["emi_to_income_ratio"] = df["emi"] / (df["monthly_income"] + 1)
@@ -51,7 +49,11 @@ def predict(applicant: Applicant):
 
     df = df.drop(columns=["loan_amount"])
 
-    prob = model.predict_proba(df)[0][1]
+    # FINAL NAN CHECK
+    if df.isna().any().any() or np.isinf(df.values).any():
+        return {"default_probability": 1.0, "risk_category": "HIGH"}
+
+    prob = float(model.predict_proba(df)[0][1])
 
     if prob < 0.35:
         risk = "LOW"
@@ -61,7 +63,7 @@ def predict(applicant: Applicant):
         risk = "HIGH"
 
     return {
-        "default_probability": round(float(prob), 4),
+        "default_probability": round(prob, 4),
         "risk_category": risk
     }
 
