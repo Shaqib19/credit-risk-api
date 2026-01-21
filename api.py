@@ -100,27 +100,24 @@ def verify_token(token: str | None):
     return active_tokens[token]
 
 # ================= PREDICT =================
+import pandas as pd
+
 @app.post("/predict")
 def predict(data: PredictInput, token: str = Header(None)):
     verify_token(token)
 
-    monthly_income = data.income / 12
-    emi = data.loan_amount / data.loan_tenure
-    emi_to_income_ratio = emi / (monthly_income + 1)
-    tenure_relief = np.log(data.loan_tenure)
+    # Recreate the EXACT training schema
+    df = pd.DataFrame([{
+        "income": data.income,
+        "credit_score": data.credit_score,
+        "loan_amount": data.loan_amount,
+        "loan_tenure": data.loan_tenure,
+        "employment_type": data.employment_type,
+        "past_default_history": data.past_default_history
+    }])
 
-    employment_encoded = 1 if data.employment_type.lower() == "salaried" else 0
-
-    X = np.array([[
-        data.income,
-        data.credit_score,
-        emi_to_income_ratio,
-        tenure_relief,
-        data.past_default_history,
-        employment_encoded
-    ]])
-
-    prob = float(model.predict_proba(X)[0][1])
+    # Let the pipeline handle preprocessing
+    prob = float(model.predict_proba(df)[0][1])
 
     if prob < 0.35:
         risk = "LOW"
@@ -134,7 +131,9 @@ def predict(data: PredictInput, token: str = Header(None)):
         "risk_category": risk
     }
 
+
 @app.get("/")
 def health():
     return {"status": "API running"}
+
 
