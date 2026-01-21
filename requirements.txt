@@ -2,8 +2,9 @@ fastapi
 uvicorn
 pandas
 numpy
-scikit-learn
+scikit-learn==1.7.2
 pydantic
 bcrypt
 mysql-connector-python
+
 
