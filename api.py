@@ -1,17 +1,15 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import pandas as pd
 import numpy as np
 import pickle
-
-# Load model
-with open("credit_risk_model.pkl", "rb") as f:
-    model = pickle.load(f)
+import mysql.connector
+import bcrypt
+import uuid
 
 app = FastAPI(title="Credit Risk API")
 
-# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -19,39 +17,101 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Load model
+with open("credit_risk_model.pkl", "rb") as f:
+    model = pickle.load(f)
+
+# Database connection
+def get_db():
+    return mysql.connector.connect(
+        host="DB_HOST",
+        user="DB_USER",
+        password="DB_PASSWORD",
+        database="credit_risk_db"
+    )
+
+# ---------------- MODELS ----------------
+class Register(BaseModel):
+    email: str
+    password: str
+
+class Login(BaseModel):
+    email: str
+    password: str
+
 class Applicant(BaseModel):
-    age: int
     income: float
     credit_score: int
-    employment_type: str
     loan_amount: float
     loan_tenure: int
+    employment_type: str
     past_default_history: int
 
-@app.post("/predict")
-def predict(applicant: Applicant):
+# Token store (simple but valid for demo)
+active_tokens = {}
 
-    # HARD SAFETY CHECK
-    if (
-        applicant.income <= 0 or
-        applicant.loan_amount <= 0 or
-        applicant.loan_tenure <= 0 or
-        applicant.credit_score <= 0
+def verify_token(token: str = Header(...)):
+    if token not in active_tokens:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    return active_tokens[token]
+
+# ---------------- AUTH ----------------
+@app.post("/register")
+def register(user: Register):
+    db = get_db()
+    cur = db.cursor()
+
+    hashed = bcrypt.hashpw(user.password.encode(), bcrypt.gensalt())
+
+    try:
+        cur.execute(
+            "INSERT INTO banks (email, password_hash) VALUES (%s,%s)",
+            (user.email, hashed.decode())
+        )
+        db.commit()
+    except:
+        raise HTTPException(status_code=400, detail="User already exists")
+
+    return {"message": "Registered successfully"}
+
+@app.post("/login")
+def login(user: Login):
+    db = get_db()
+    cur = db.cursor(dictionary=True)
+
+    cur.execute("SELECT * FROM banks WHERE email=%s", (user.email,))
+    bank = cur.fetchone()
+
+    if not bank or not bcrypt.checkpw(
+        user.password.encode(),
+        bank["password_hash"].encode()
     ):
-        return {"default_probability": 1.0, "risk_category": "HIGH"}
+        raise HTTPException(status_code=401, detail="Invalid credentials")
 
-    df = pd.DataFrame([applicant.dict()])
+    token = str(uuid.uuid4())
+    active_tokens[token] = bank["id"]
 
-    df["monthly_income"] = df["income"] / 12
-    df["emi"] = df["loan_amount"] / df["loan_tenure"]
-    df["emi_to_income_ratio"] = df["emi"] / (df["monthly_income"] + 1)
-    df["tenure_relief"] = np.log(df["loan_tenure"])
+    return {"token": token}
 
-    df = df.drop(columns=["loan_amount"])
+# ---------------- PREDICTION ----------------
+@app.post("/predict")
+def predict(applicant: Applicant, bank_id: int = Depends(verify_token)):
 
-    # FINAL NAN CHECK
-    if df.isna().any().any() or np.isinf(df.values).any():
-        return {"default_probability": 1.0, "risk_category": "HIGH"}
+    monthly_income = applicant.income / 12
+    emi = applicant.loan_amount / applicant.loan_tenure
+    emi_to_income_ratio = emi / (monthly_income + 1)
+    tenure_relief = np.log(applicant.loan_tenure)
+
+    employment_encoded = 1 if applicant.employment_type.lower() == "salaried" else 0
+
+    df = pd.DataFrame([{
+        "income": applicant.income,
+        "credit_score": applicant.credit_score,
+        "emi_to_income_ratio": emi_to_income_ratio,
+        "tenure_relief": tenure_relief,
+        "past_default_history": applicant.past_default_history,
+        "employment_type_encoded": employment_encoded
+    }])
 
     prob = float(model.predict_proba(df)[0][1])
 
@@ -61,6 +121,24 @@ def predict(applicant: Applicant):
         risk = "MEDIUM"
     else:
         risk = "HIGH"
+
+    db = get_db()
+    cur = db.cursor()
+    cur.execute("""
+        INSERT INTO predictions
+        (bank_id, income, credit_score, emi_to_income_ratio,
+         tenure_relief, default_probability, risk_category)
+        VALUES (%s,%s,%s,%s,%s,%s,%s)
+    """, (
+        bank_id,
+        applicant.income,
+        applicant.credit_score,
+        emi_to_income_ratio,
+        tenure_relief,
+        prob,
+        risk
+    ))
+    db.commit()
 
     return {
         "default_probability": round(prob, 4),
