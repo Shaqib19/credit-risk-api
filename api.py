@@ -1,18 +1,18 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import sqlite3
 import bcrypt
 import pickle
 import numpy as np
+import uuid
 
-app = FastAPI()
+# ================= APP =================
+app = FastAPI(title="Credit Risk API")
 
-# ================= CORS =================
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -24,16 +24,20 @@ def get_db():
     return sqlite3.connect(DB, check_same_thread=False)
 
 conn = get_db()
-cursor = conn.cursor()
+cur = conn.cursor()
 
-cursor.execute("""
+cur.execute("""
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     email TEXT UNIQUE,
     password TEXT
 )
 """)
+
 conn.commit()
+
+# ================= TOKEN STORE =================
+active_tokens = {}
 
 # ================= LOAD MODEL =================
 with open("credit_risk_model.pkl", "rb") as f:
@@ -45,20 +49,20 @@ class Auth(BaseModel):
     password: str
 
 class PredictInput(BaseModel):
-    age: int
     income: float
     credit_score: int
-    employment_type: str
     loan_amount: float
     loan_tenure: int
+    employment_type: str
     past_default_history: int
 
-# ================= AUTH =================
+# ================= REGISTER =================
 @app.post("/register")
 def register(data: Auth):
-    hashed = bcrypt.hashpw(data.password.encode(), bcrypt.gensalt())
+    hashed = bcrypt.hashpw(data.password.encode(), bcrypt.gensalt()).decode()
+
     try:
-        cursor.execute(
+        cur.execute(
             "INSERT INTO users (email, password) VALUES (?, ?)",
             (data.email, hashed)
         )
@@ -67,42 +71,63 @@ def register(data: Auth):
     except:
         raise HTTPException(status_code=400, detail="User already exists")
 
+# ================= LOGIN =================
 @app.post("/login")
 def login(data: Auth):
-    cursor.execute("SELECT password FROM users WHERE email=?", (data.email,))
-    row = cursor.fetchone()
+    cur.execute("SELECT id, password FROM users WHERE email=?", (data.email,))
+    row = cur.fetchone()
+
     if not row:
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
-    if bcrypt.checkpw(data.password.encode(), row[0]):
-        return {"message": "Login successful"}
-    else:
+    user_id, stored_hash = row
+
+    if not bcrypt.checkpw(data.password.encode(), stored_hash.encode()):
         raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    token = str(uuid.uuid4())
+    active_tokens[token] = user_id
+
+    return {"token": token}
+
+# ================= TOKEN CHECK =================
+def verify_token(token: str | None):
+    if not token or token not in active_tokens:
+        raise HTTPException(status_code=401, detail="Invalid or missing token")
+    return active_tokens[token]
 
 # ================= PREDICT =================
 @app.post("/predict")
-def predict(d: PredictInput):
+def predict(data: PredictInput, token: str = Header(None)):
+    verify_token(token)
+
+    monthly_income = data.income / 12
+    emi = data.loan_amount / data.loan_tenure
+    emi_to_income_ratio = emi / (monthly_income + 1)
+    tenure_relief = np.log(data.loan_tenure)
+
+    employment_encoded = 1 if data.employment_type.lower() == "salaried" else 0
+
     X = np.array([[
-        d.age,
-        d.income,
-        d.credit_score,
-        1 if d.employment_type == "Salaried" else 0,
-        d.loan_amount,
-        d.loan_tenure,
-        d.past_default_history
+        data.income,
+        data.credit_score,
+        emi_to_income_ratio,
+        tenure_relief,
+        data.past_default_history,
+        employment_encoded
     ]])
 
-    prob = model.predict_proba(X)[0][1]
+    prob = float(model.predict_proba(X)[0][1])
 
     if prob < 0.35:
-        risk = "LOW RISK 🟢"
+        risk = "LOW"
     elif prob < 0.60:
-        risk = "MEDIUM RISK 🟡"
+        risk = "MEDIUM"
     else:
-        risk = "HIGH RISK 🔴"
+        risk = "HIGH"
 
     return {
-        "default_probability": float(prob),
+        "default_probability": round(prob, 4),
         "risk_category": risk
     }
 
