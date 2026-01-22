@@ -98,13 +98,22 @@ def predict(data: PredictInput, authorization: str = Header(None)):
     verify_token(authorization)
 
     try:
+        # ---------- FEATURE ENGINEERING ----------
+        emi_to_income_ratio = data.loan_amount / max(data.income, 1)
+        loan_to_income_ratio = data.loan_amount / max(data.income, 1)
+
+        tenure_relief = 1 if data.loan_tenure >= 24 else 0
+
         df = pd.DataFrame([{
-            "age": data.age,
+            "age": 35,  # fixed or optional
             "income": data.income,
             "credit_score": data.credit_score,
             "employment_type": data.employment_type,
             "loan_amount": data.loan_amount,
             "loan_tenure": data.loan_tenure,
+            "emi_to_income_ratio": emi_to_income_ratio,
+            "loan_to_income_ratio": loan_to_income_ratio,
+            "tenure_relief": tenure_relief,
             "past_default_history": data.past_default_history
         }])
 
@@ -123,5 +132,5 @@ def predict(data: PredictInput, authorization: str = Header(None)):
         }
 
     except Exception as e:
-        print("PREDICT ERROR:", e)  # <-- shows in Render logs
+        print("🔥 PREDICT ERROR:", e)
         raise HTTPException(status_code=500, detail=str(e))
