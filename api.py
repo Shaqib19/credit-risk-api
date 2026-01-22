@@ -9,7 +9,7 @@ app = FastAPI(title="Credit Risk API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://credit-risk-detect.netlify.app"],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -97,31 +97,33 @@ def verify_token(token: str | None):
 def predict(data: PredictInput, token: str = Header(None)):
     verify_token(token)
 
-    # IMPORTANT: columns MUST match training exactly
-    df = pd.DataFrame([{
-        "age": data.age,
-        "income": data.income,
-        "credit_score": data.credit_score,
-        "employment_type": data.employment_type,
-        "loan_amount": data.loan_amount,
-        "loan_tenure": data.loan_tenure,
-        "past_default_history": data.past_default_history
-    }])
+    try:
+        df = pd.DataFrame([{
+            "age": data.age,
+            "income": data.income,
+            "credit_score": data.credit_score,
+            "employment_type": data.employment_type,
+            "loan_amount": data.loan_amount,
+            "loan_tenure": data.loan_tenure,
+            "past_default_history": data.past_default_history
+        }])
 
-    prob = float(model.predict_proba(df)[0][1])
+        prob = float(model.predict_proba(df)[0][1])
 
-    if prob < 0.35:
-        risk = "LOW"
-    elif prob < 0.60:
-        risk = "MEDIUM"
-    else:
-        risk = "HIGH"
+        if prob < 0.35:
+            risk = "LOW"
+        elif prob < 0.60:
+            risk = "MEDIUM"
+        else:
+            risk = "HIGH"
 
-    return {
-        "default_probability": round(prob, 4),
-        "risk_category": risk
-    }
+        return {
+            "default_probability": round(prob, 4),
+            "risk_category": risk
+        }
 
-@app.get("/")
-def health():
-    return {"status": "API running"}
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Prediction failed: {str(e)}"
+        )
