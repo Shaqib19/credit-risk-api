@@ -1,24 +1,19 @@
 from fastapi import FastAPI, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-import sqlite3
-import bcrypt
-import pickle
-import numpy as np
-import uuid
+import sqlite3, bcrypt, pickle, uuid
 import pandas as pd
+
 # ================= APP =================
 app = FastAPI(title="Credit Risk API")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://credit-risk-detect.netlify.app"
-    ],
+    allow_origins=["https://credit-risk-detect.netlify.app"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
 
 # ================= DATABASE =================
 DB = "users.db"
@@ -36,7 +31,6 @@ CREATE TABLE IF NOT EXISTS users (
     password TEXT
 )
 """)
-
 conn.commit()
 
 # ================= TOKEN STORE =================
@@ -52,18 +46,18 @@ class Auth(BaseModel):
     password: str
 
 class PredictInput(BaseModel):
+    age: int = 35
     income: float
     credit_score: int
+    employment_type: str
     loan_amount: float
     loan_tenure: int
-    employment_type: str
     past_default_history: int
 
 # ================= REGISTER =================
 @app.post("/register")
 def register(data: Auth):
     hashed = bcrypt.hashpw(data.password.encode(), bcrypt.gensalt()).decode()
-
     try:
         cur.execute(
             "INSERT INTO users (email, password) VALUES (?, ?)",
@@ -97,26 +91,23 @@ def login(data: Auth):
 def verify_token(token: str | None):
     if not token or token not in active_tokens:
         raise HTTPException(status_code=401, detail="Invalid or missing token")
-    return active_tokens[token]
 
 # ================= PREDICT =================
-import pandas as pd
-
 @app.post("/predict")
 def predict(data: PredictInput, token: str = Header(None)):
     verify_token(token)
 
-    # Recreate the EXACT training schema
+    # IMPORTANT: columns MUST match training exactly
     df = pd.DataFrame([{
+        "age": data.age,
         "income": data.income,
         "credit_score": data.credit_score,
+        "employment_type": data.employment_type,
         "loan_amount": data.loan_amount,
         "loan_tenure": data.loan_tenure,
-        "employment_type": data.employment_type,
         "past_default_history": data.past_default_history
     }])
 
-    # Let the pipeline handle preprocessing
     prob = float(model.predict_proba(df)[0][1])
 
     if prob < 0.35:
@@ -131,10 +122,6 @@ def predict(data: PredictInput, token: str = Header(None)):
         "risk_category": risk
     }
 
-
 @app.get("/")
 def health():
     return {"status": "API running"}
-
-
-
