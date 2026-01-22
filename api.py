@@ -98,22 +98,30 @@ def predict(data: PredictInput, authorization: str = Header(None)):
     verify_token(authorization)
 
     try:
-        # ================= FEATURE ENGINEERING (MATCH TRAINING) =================
-        monthly_income = data.income / 12
+        # ---------------- FEATURE ENGINEERING (MATCH TRAINING) ----------------
+        age = 35  # fixed value (or make optional later)
+        income = data.income
+
+        monthly_income = income / 12
         emi = data.loan_amount / max(data.loan_tenure, 1)
 
-        loan_to_income_ratio = data.loan_amount / max(data.income, 1)
+        emi_to_income_ratio = emi / max(monthly_income, 1)
+        loan_to_income_ratio = data.loan_amount / max(income, 1)
+
         tenure_relief = 1 if data.loan_tenure >= 24 else 0
 
-        # ================= EXACT MODEL INPUT =================
+        # ---------------- EXACT MODEL INPUT ----------------
         df = pd.DataFrame([{
+            "age": age,
+            "income": income,
             "monthly_income": monthly_income,
             "emi": emi,
+            "emi_to_income_ratio": emi_to_income_ratio,
+            "loan_to_income_ratio": loan_to_income_ratio,
             "credit_score": data.credit_score,
             "employment_type": data.employment_type,
             "loan_amount": data.loan_amount,
             "loan_tenure": data.loan_tenure,
-            "loan_to_income_ratio": loan_to_income_ratio,
             "tenure_relief": tenure_relief,
             "past_default_history": data.past_default_history
         }])
