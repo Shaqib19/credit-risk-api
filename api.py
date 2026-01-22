@@ -94,8 +94,8 @@ def verify_token(token: str | None):
 
 # ================= PREDICT =================
 @app.post("/predict")
-def predict(data: PredictInput, token: str = Header(None)):
-    verify_token(token)
+def predict(data: PredictInput, authorization: str = Header(None)):
+    verify_token(authorization)
 
     try:
         df = pd.DataFrame([{
@@ -123,7 +123,5 @@ def predict(data: PredictInput, token: str = Header(None)):
         }
 
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Prediction failed: {str(e)}"
-        )
+        print("PREDICT ERROR:", e)  # <-- shows in Render logs
+        raise HTTPException(status_code=500, detail=str(e))
